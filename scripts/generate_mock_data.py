@@ -19,11 +19,20 @@ SIGNALS_DIR = ROOT / "signals"
 # Fixed seed for reproducibility
 random.seed(0)
 
+# Signal convention:
+#   1  = enter long      -1  = exit long
+#   2  = enter short     -2  = exit short
+#   0  = no action
+
 ENTRY_TAGS_A = ["breakout_long", "momentum_long", "trend_follow", "mean_revert"]
 EXIT_TAGS_A = ["tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "manual_exit", "trailing_stop"]
 
 ENTRY_TAGS_B = ["swing_long", "news_impulse", "liquidity_grab"]
 EXIT_TAGS_B = ["tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "reversal_signal", "timeout_exit"]
+
+ENTRY_TAGS_C_LONG  = ["breakout_long", "oversold_bounce", "support_hold"]
+ENTRY_TAGS_C_SHORT = ["breakout_short", "overbought_fade", "resistance_reject"]
+EXIT_TAGS_C = ["tp1_hit", "tp2_hit", "tp3_hit", "sl_hit", "reversal_exit"]
 
 
 def _generate_signals(
@@ -34,63 +43,86 @@ def _generate_signals(
     entry_tags: list[str],
     exit_tags: list[str],
     avg_trades_per_week: float = 3.0,
+    allow_short: bool = False,
+    short_ratio: float = 0.4,
 ) -> pd.DataFrame:
-    """Generate a realistic signal sequence for one pair."""
+    """
+    Generate a realistic signal sequence for one pair.
+
+    If allow_short=True, roughly short_ratio fraction of entries will be short
+    trades (signal=2 / signal=-2); the rest are longs (signal=1 / signal=-1).
+    Long and short positions are never open simultaneously.
+    """
     rows = []
     current = start
     candle_delta = timedelta(hours=timeframe_h)
 
-    in_trade = False
-    entry_time = None
+    long_entry_time: datetime | None = None
+    short_entry_time: datetime | None = None
     min_hold_h = max(timeframe_h, 2)
+
+    short_entry_tags = ENTRY_TAGS_C_SHORT if allow_short else []
 
     while current < end:
         ts_ms = int(current.timestamp() * 1000)
+        in_long  = long_entry_time is not None
+        in_short = short_entry_time is not None
 
-        if not in_trade:
-            # Probability of entry each candle (Poisson-like)
+        if not in_long and not in_short:
             candles_per_week = 7 * 24 / timeframe_h
             p_entry = avg_trades_per_week / candles_per_week
             if random.random() < p_entry:
-                rows.append({
-                    "timestamp": ts_ms,
-                    "pair": pair,
-                    "signal": 1,
-                    "entry_tag": random.choice(entry_tags),
-                    "exit_tag": "",
-                })
-                in_trade = True
-                entry_time = current
+                go_short = allow_short and random.random() < short_ratio
+                if go_short:
+                    rows.append({
+                        "timestamp": ts_ms, "pair": pair, "signal": 2,
+                        "entry_tag": random.choice(short_entry_tags), "exit_tag": "",
+                    })
+                    short_entry_time = current
+                else:
+                    rows.append({
+                        "timestamp": ts_ms, "pair": pair, "signal": 1,
+                        "entry_tag": random.choice(entry_tags), "exit_tag": "",
+                    })
+                    long_entry_time = current
             else:
                 rows.append({"timestamp": ts_ms, "pair": pair, "signal": 0,
                               "entry_tag": "", "exit_tag": ""})
-        else:
-            hold_so_far = (current - entry_time).total_seconds() / 3600
-            # Exit probability increases with hold time; min hold = min_hold_h
-            if hold_so_far < min_hold_h:
-                p_exit = 0.0
-            else:
-                # Sigmoid-like: ramps up from min_hold to ~72h
-                p_exit = min(0.35, (hold_so_far - min_hold_h) / 80.0 + 0.05)
 
+        elif in_long:
+            hold_h = (current - long_entry_time).total_seconds() / 3600
+            p_exit = 0.0 if hold_h < min_hold_h else min(0.35, (hold_h - min_hold_h) / 80.0 + 0.05)
             if random.random() < p_exit:
                 rows.append({
-                    "timestamp": ts_ms,
-                    "pair": pair,
-                    "signal": -1,
-                    "entry_tag": "",
-                    "exit_tag": random.choice(exit_tags),
+                    "timestamp": ts_ms, "pair": pair, "signal": -1,
+                    "entry_tag": "", "exit_tag": random.choice(exit_tags),
                 })
-                in_trade = False
+                long_entry_time = None
+            else:
+                rows.append({"timestamp": ts_ms, "pair": pair, "signal": 0,
+                              "entry_tag": "", "exit_tag": ""})
+
+        else:  # in_short
+            hold_h = (current - short_entry_time).total_seconds() / 3600
+            p_exit = 0.0 if hold_h < min_hold_h else min(0.35, (hold_h - min_hold_h) / 80.0 + 0.05)
+            if random.random() < p_exit:
+                rows.append({
+                    "timestamp": ts_ms, "pair": pair, "signal": -2,
+                    "entry_tag": "", "exit_tag": random.choice(exit_tags),
+                })
+                short_entry_time = None
             else:
                 rows.append({"timestamp": ts_ms, "pair": pair, "signal": 0,
                               "entry_tag": "", "exit_tag": ""})
 
         current += candle_delta
 
-    # Close any open trade at end
-    if in_trade and rows:
+    # Close any open position at end
+    if long_entry_time is not None and rows:
         rows[-1]["signal"] = -1
+        rows[-1]["exit_tag"] = "end_of_period"
+    elif short_entry_time is not None and rows:
+        rows[-1]["signal"] = -2
         rows[-1]["exit_tag"] = "end_of_period"
 
     return pd.DataFrame(rows)
@@ -107,6 +139,7 @@ def generate_all(start_date: str = "20230101", end_date: str = "20240101"):
             "entry_tags": ENTRY_TAGS_A,
             "exit_tags": EXIT_TAGS_A,
             "avg_trades_per_week": 4,
+            "allow_short": False,
         },
         "StrategyB": {
             "pairs": ["BTC/USDT", "ETH/USDT"],
@@ -114,6 +147,16 @@ def generate_all(start_date: str = "20230101", end_date: str = "20240101"):
             "entry_tags": ENTRY_TAGS_B,
             "exit_tags": EXIT_TAGS_B,
             "avg_trades_per_week": 2,
+            "allow_short": False,
+        },
+        "StrategyC": {
+            "pairs": ["BTC/USDT", "ETH/USDT"],
+            "timeframe_h": 1,
+            "entry_tags": ENTRY_TAGS_C_LONG,
+            "exit_tags": EXIT_TAGS_C,
+            "avg_trades_per_week": 5,
+            "allow_short": True,
+            "short_ratio": 0.4,
         },
     }
 
@@ -135,10 +178,14 @@ def generate_all(start_date: str = "20230101", end_date: str = "20240101"):
                 entry_tags=cfg["entry_tags"],
                 exit_tags=cfg["exit_tags"],
                 avg_trades_per_week=cfg["avg_trades_per_week"],
+                allow_short=cfg.get("allow_short", False),
+                short_ratio=cfg.get("short_ratio", 0.4),
             )
             df.to_csv(csv_path, index=False)
-            n_trades = (df["signal"] == 1).sum()
-            print(f"  Generated {csv_path.relative_to(ROOT)}  ({n_trades} entry signals)")
+            n_long  = (df["signal"] == 1).sum()
+            n_short = (df["signal"] == 2).sum()
+            short_note = f", {n_short} short" if n_short > 0 else ""
+            print(f"  Generated {csv_path.relative_to(ROOT)}  ({n_long} long{short_note})")
             generated.append(csv_path)
 
     return generated

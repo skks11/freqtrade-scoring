@@ -14,6 +14,16 @@ ROOT = Path(__file__).parent.parent
 SIGNALS_DIR = ROOT / "signals"
 
 
+"""
+Signal convention:
+    1  = enter long
+   -1  = exit long  (close long position)
+    2  = enter short
+   -2  = exit short (close short position)
+    0  = no action
+"""
+
+
 def _load_signals(strategy_name: str, pair: str, timeframe: str) -> pd.DataFrame:
     pair_file = pair.replace("/", "_")
     path = SIGNALS_DIR / strategy_name / f"{pair_file}_{timeframe}.csv"
@@ -57,7 +67,7 @@ def _simulate_trade_profit(exit_tag: str, sl_pct: float, tp_config: dict) -> flo
 
 
 def _build_trade(entry_row: pd.Series, exit_row: pd.Series, sl_pct: float,
-                 tp_config: dict, pair: str) -> dict[str, Any]:
+                 tp_config: dict, pair: str, side: str = "long") -> dict[str, Any]:
     entry_ts = entry_row["timestamp"]
     exit_ts = exit_row["timestamp"]
     if exit_ts <= entry_ts:
@@ -72,8 +82,13 @@ def _build_trade(entry_row: pd.Series, exit_row: pd.Series, sl_pct: float,
         # Weighted average across TP levels vs remaining position
         profit_pct *= random.uniform(0.75, 1.0)
 
+    # For shorts, price moving down is profit — invert sign to reflect that
+    if side == "short":
+        profit_pct = -profit_pct  # raw sim gives long-style profit; flip for short
+
     return {
         "pair": pair,
+        "side": side,
         "entry_time": entry_ts.isoformat(),
         "exit_time": exit_ts.isoformat(),
         "duration_mins": duration_mins,
@@ -176,18 +191,26 @@ def run_mock_backtest(
         df = df[(df["timestamp"] >= start_dt) & (df["timestamp"] <= end_dt)].copy()
         df = df.sort_values("timestamp").reset_index(drop=True)
 
-        in_trade = False
-        entry_row = None
+        # Track long and short positions independently
+        long_entry: pd.Series | None = None
+        short_entry: pd.Series | None = None
 
         for _, row in df.iterrows():
             sig = int(row["signal"])
-            if not in_trade and sig == 1:
-                in_trade = True
-                entry_row = row
-            elif in_trade and sig == -1:
-                in_trade = False
-                trade = _build_trade(entry_row, row, sl_pct, tp_config, pair)
+
+            if sig == 1 and long_entry is None:          # enter long
+                long_entry = row
+            elif sig == -1 and long_entry is not None:    # exit long
+                trade = _build_trade(long_entry, row, sl_pct, tp_config, pair, side="long")
                 all_trades.append(trade)
+                long_entry = None
+
+            elif sig == 2 and short_entry is None:        # enter short
+                short_entry = row
+            elif sig == -2 and short_entry is not None:   # exit short
+                trade = _build_trade(short_entry, row, sl_pct, tp_config, pair, side="short")
+                all_trades.append(trade)
+                short_entry = None
 
         used_pairs.append(pair)
 

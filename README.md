@@ -124,18 +124,32 @@ signals/StrategyB/BTC_USDT_4h.csv
 |--------|------|----------|-------------|
 | `timestamp` | int64 | **yes** | K-line **open** time in Unix milliseconds (UTC) |
 | `pair` | string | **yes** | Trading pair with slash — e.g. `BTC/USDT` |
-| `signal` | int | **yes** | `1` = enter long · `-1` = exit long · `0` = no action |
-| `entry_tag` | string | no | Label for the entry reason (only read when `signal=1`) |
-| `exit_tag` | string | no | Label for the exit reason (only read when `signal=-1`); drives `custom_exit` logic |
+| `signal` | int | **yes** | See signal table below |
+| `entry_tag` | string | no | Label for the entry reason (read when `signal=1` or `signal=2`) |
+| `exit_tag` | string | no | Label for the exit reason (read when `signal=-1` or `signal=-2`); drives `custom_exit` logic |
+
+---
+
+### Signal Values
+
+| Value | Direction | Meaning |
+|------:|-----------|---------|
+| `1`  | Long  | Enter long — open a long position |
+| `-1` | Long  | Exit long — close the current long position |
+| `2`  | Short | Enter short — open a short position |
+| `-2` | Short | Exit short — close the current short position |
+| `0`  | —     | No action (hold / gap candle) |
+
+**Convention:** positive = enter, negative = exit; magnitude encodes direction (1 = long, 2 = short).
 
 ---
 
 ### Signal Semantics
 
-- **`signal=1`** — open a long position at this candle's open time. Ignored if already in a trade.
-- **`signal=-1`** — close the current long position. Ignored if not in a trade.
-- **`signal=0`** — no action; row is still required to maintain a complete candle timeline.
-- The engine pairs each `1` with the next subsequent `-1` to form a trade.
+- `signal=1` is ignored if a long is already open; `signal=2` is ignored if a short is already open.
+- `signal=-1` is ignored if no long is open; `signal=-2` is ignored if no short is open.
+- Long and short positions are tracked independently — a long and a short on the same pair can coexist (hedge mode).
+- The engine pairs each entry with the next matching exit to form a trade.
 - An unclosed position at the end of the file is silently dropped.
 - Rows must be **sorted ascending by `timestamp`**; duplicate timestamps for the same pair are undefined behaviour.
 
@@ -180,13 +194,17 @@ timestamp,pair,signal,entry_tag,exit_tag
 1672790400000,BTC/USDT,-1,,tp2_hit
 1672876800000,BTC/USDT,1,momentum_long,
 1672963200000,BTC/USDT,-1,,sl_hit
-1673049600000,ETH/USDT,1,trend_follow,
-1673136000000,ETH/USDT,-1,,manual_exit
+1673049600000,ETH/USDT,2,resistance_reject,
+1673136000000,ETH/USDT,0,,
+1673222400000,ETH/USDT,-2,,tp1_hit
+1673308800000,ETH/USDT,1,oversold_bounce,
+1673395200000,ETH/USDT,-1,,manual_exit
 ```
 
-- Rows 1–4: one BTC trade, entered on breakout, exited at TP2
-- Rows 5–6: second BTC trade, entered on momentum, hit stop loss
-- Rows 7–8: one ETH trade with a custom strategy-specific exit tag
+- Rows 1–4: BTC long, entered on breakout, exited at TP2
+- Rows 5–6: BTC long, entered on momentum, hit stop loss
+- Rows 7–9: ETH **short**, entered on resistance rejection, closed at TP1
+- Rows 10–11: ETH long, custom strategy-specific exit tag
 
 ---
 

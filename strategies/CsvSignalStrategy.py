@@ -42,8 +42,13 @@ class CsvSignalStrategy(IStrategy):  # type: ignore[misc]
     to config-driven rules and subclass overrides.
     """
 
+    # Signal convention:
+    #   1  = enter long      -1  = exit long
+    #   2  = enter short     -2  = exit short
+    #   0  = no action
+
     INTERFACE_VERSION = 3
-    can_short = False
+    can_short = True   # required for short signals to work in freqtrade
     use_custom_stoploss = True
     process_only_new_candles = True
     use_exit_signal = True
@@ -116,17 +121,23 @@ class CsvSignalStrategy(IStrategy):  # type: ignore[misc]
         signals = self._load_signals(pair)
 
         dataframe["enter_long"] = 0
+        dataframe["enter_short"] = 0
         dataframe["enter_tag"] = ""
 
         if signals.empty:
             return dataframe
 
-        sig_map = signals[signals["signal"] == 1].set_index("timestamp")
+        long_map  = signals[signals["signal"] == 1].set_index("timestamp")
+        short_map = signals[signals["signal"] == 2].set_index("timestamp")
+
         for idx, row in dataframe.iterrows():
             ts = row["date"]
-            if ts in sig_map.index:
+            if ts in long_map.index:
                 dataframe.at[idx, "enter_long"] = 1
-                dataframe.at[idx, "enter_tag"] = sig_map.at[ts, "entry_tag"]
+                dataframe.at[idx, "enter_tag"] = long_map.at[ts, "entry_tag"]
+            elif ts in short_map.index:
+                dataframe.at[idx, "enter_short"] = 1
+                dataframe.at[idx, "enter_tag"] = short_map.at[ts, "entry_tag"]
 
         return dataframe
 
@@ -135,20 +146,27 @@ class CsvSignalStrategy(IStrategy):  # type: ignore[misc]
         signals = self._load_signals(pair)
 
         dataframe["exit_long"] = 0
+        dataframe["exit_short"] = 0
         dataframe["exit_tag"] = ""
 
         if signals.empty:
             return dataframe
 
-        sig_map = signals[signals["signal"] == -1].set_index("timestamp")
+        tp_enabled = self._get_tp_config().get("enabled", False)
+
+        long_exit_map  = signals[signals["signal"] == -1].set_index("timestamp")
+        short_exit_map = signals[signals["signal"] == -2].set_index("timestamp")
+
         for idx, row in dataframe.iterrows():
             ts = row["date"]
-            if ts in sig_map.index:
-                # Only hard-exit here when TP is disabled; with TP on, custom_exit handles it.
-                tp_cfg = self._get_tp_config()
-                if not tp_cfg.get("enabled", False):
+            if ts in long_exit_map.index:
+                if not tp_enabled:
                     dataframe.at[idx, "exit_long"] = 1
-                dataframe.at[idx, "exit_tag"] = sig_map.at[ts, "exit_tag"]
+                dataframe.at[idx, "exit_tag"] = long_exit_map.at[ts, "exit_tag"]
+            elif ts in short_exit_map.index:
+                if not tp_enabled:
+                    dataframe.at[idx, "exit_short"] = 1
+                dataframe.at[idx, "exit_tag"] = short_exit_map.at[ts, "exit_tag"]
 
         return dataframe
 
