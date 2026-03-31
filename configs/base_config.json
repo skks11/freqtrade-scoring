@@ -1,0 +1,37 @@
+{
+  "max_open_trades": 3,
+  "stake_currency": "USDT",
+  "stake_amount": 100,
+  "tradable_balance_ratio": 0.99,
+  "fiat_display_currency": "USD",
+  "timeframe": "1h",
+  "dry_run": true,
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+  },
+  "dataformat_ohlcv": "json",
+  "dataformat_trades": "jsongz",
+  "stoploss": -0.05,
+  "trailing_stop": false,
+  "trailing_stop_positive": null,
+  "trailing_stop_positive_offset": null,
+  "trailing_only_offset_is_reached": false,
+  "minimal_roi": {
+    "0": 0.10,
+    "60": 0.05,
+    "120": 0.02,
+    "240": 0.01
+  },
+  "tp_config": {
+    "enabled": false,
+    "levels": [
+      {"ratio": 0.33, "target": 0.01},
+      {"ratio": 0.33, "target": 0.02},
+      {"ratio": 0.34, "target": 0.03}
+    ]
+  }
+}

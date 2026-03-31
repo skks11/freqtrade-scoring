@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>freqtrade Benchmark Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; }
+    th { user-select: none; }
+    th.sortable:hover { background-color: #1e293b; cursor: pointer; }
+    th.sort-asc::after  { content: ' ↑'; color: #38bdf8; }
+    th.sort-desc::after { content: ' ↓'; color: #38bdf8; }
+    .profit-pos { color: #4ade80; }
+    .profit-neg { color: #f87171; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+    .badge-blue   { background: #1e3a5f; color: #7dd3fc; }
+    .badge-green  { background: #14532d; color: #86efac; }
+    .badge-yellow { background: #422006; color: #fde68a; }
+    .fade-in { animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 50; display: flex; align-items: center; justify-content: center; }
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; padding: 12px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; animation: fadeIn .2s ease; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+
+<!-- Header -->
+<header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center gap-4">
+  <div class="flex items-center gap-2">
+    <span class="text-2xl">📊</span>
+    <h1 class="text-lg font-bold text-white">freqtrade Benchmark Dashboard</h1>
+  </div>
+  <div class="ml-auto flex items-center gap-3">
+    <span id="total-badge" class="badge badge-blue">— records</span>
+    <button onclick="refresh()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm transition">↺ Refresh</button>
+    <button onclick="importCsv()" class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">⇧ Import CSV</button>
+  </div>
+</header>
+
+<div class="flex min-h-[calc(100vh-65px)]">
+
+  <!-- Filter Panel -->
+  <aside class="w-64 bg-slate-900 border-r border-slate-800 p-5 flex-shrink-0">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Filters</h2>
+
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Strategy</label>
+        <input id="f-strategy" type="text" placeholder="e.g. StrategyA"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Tag</label>
+        <input id="f-tag" type="text" placeholder="exact match"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Min Win Rate</label>
+        <input id="f-min-wr" type="number" step="0.01" min="0" max="1" placeholder="0.0 – 1.0"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Max Drawdown ≥</label>
+        <input id="f-max-dd" type="number" step="0.01" placeholder="e.g. -0.15"
+          class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Sort By</label>
+        <select id="f-sort-by" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+          <option value="run_at">Run At</option>
+          <option value="sharpe">Sharpe</option>
+          <option value="win_rate">Win Rate</option>
+          <option value="total_profit_pct">Total Profit</option>
+          <option value="max_drawdown">Max Drawdown</option>
+          <option value="calmar">Calmar</option>
+          <option value="total_trades">Trades</option>
+          <option value="profit_factor">Profit Factor</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1">Order</label>
+        <select id="f-order" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+          <option value="desc">Descending</option>
+          <option value="asc">Ascending</option>
+        </select>
+      </div>
+      <button onclick="applyFilters()" class="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition">Apply Filters</button>
+      <button onclick="clearFilters()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm transition">Clear</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 p-6 overflow-auto">
+    <!-- Stats summary -->
+    <div id="summary-cards" class="grid grid-cols-4 gap-4 mb-6"></div>
+
+    <!-- Table -->
+    <div class="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="bg-slate-800 text-slate-400 text-xs uppercase tracking-wider">
+              <th class="px-4 py-3 text-left sortable" data-col="run_at">Run</th>
+              <th class="px-4 py-3 text-left sortable" data-col="strategy">Strategy</th>
+              <th class="px-4 py-3 text-left">Tag</th>
+              <th class="px-4 py-3 text-left">Timerange</th>
+              <th class="px-4 py-3 text-right sortable" data-col="total_trades">Trades</th>
+              <th class="px-4 py-3 text-right sortable" data-col="win_rate">WR%</th>
+              <th class="px-4 py-3 text-right sortable" data-col="total_profit_pct">Profit%</th>
+              <th class="px-4 py-3 text-right sortable" data-col="max_drawdown">MaxDD%</th>
+              <th class="px-4 py-3 text-right sortable" data-col="profit_factor">PF</th>
+              <th class="px-4 py-3 text-right sortable" data-col="sharpe">Sharpe</th>
+              <th class="px-4 py-3 text-right sortable" data-col="calmar">Calmar</th>
+              <th class="px-4 py-3 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="table-body" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+      <!-- Pagination -->
+      <div class="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-sm text-slate-400">
+        <span id="page-info">—</span>
+        <div class="flex gap-2">
+          <button id="btn-prev" onclick="changePage(-1)" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40 transition">← Prev</button>
+          <button id="btn-next" onclick="changePage(1)"  class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40 transition">Next →</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Detail Modal -->
+<div id="modal" class="modal-overlay hidden" onclick="closeModal(event)">
+  <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl mx-4 p-6 max-h-[80vh] overflow-y-auto fade-in" onclick="event.stopPropagation()">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-lg font-bold" id="modal-title">Run Detail</h2>
+      <button onclick="document.getElementById('modal').classList.add('hidden')" class="text-slate-400 hover:text-white text-xl">✕</button>
+    </div>
+    <div id="modal-body" class="space-y-2 text-sm"></div>
+  </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div id="confirm-modal" class="modal-overlay hidden" onclick="closeConfirm(event)">
+  <div class="bg-slate-900 border border-red-700 rounded-xl p-6 w-full max-w-sm mx-4 fade-in" onclick="event.stopPropagation()">
+    <h2 class="font-bold text-lg mb-2">Delete Record?</h2>
+    <p class="text-slate-400 text-sm mb-4">This will remove the benchmark entry. The results directory will not be deleted.</p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeConfirm()" class="px-4 py-2 bg-slate-700 rounded text-sm">Cancel</button>
+      <button id="confirm-delete-btn" class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-medium">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script>
+  const PAGE_SIZE = 20;
+  let state = { offset: 0, total: 0, sortBy: 'run_at', order: 'desc' };
+
+  // ── Fetch & render ──────────────────────────────────────────────────────────
+
+  async function fetchData() {
+    const params = new URLSearchParams({
+      sort_by: state.sortBy,
+      order: state.order,
+      limit: PAGE_SIZE,
+      offset: state.offset,
+    });
+    const strategy = document.getElementById('f-strategy').value.trim();
+    const tag = document.getElementById('f-tag').value.trim();
+    const minWr = document.getElementById('f-min-wr').value;
+    const maxDd = document.getElementById('f-max-dd').value;
+
+    if (strategy) params.set('strategy', strategy);
+    if (tag) params.set('tag', tag);
+    if (minWr !== '') params.set('min_win_rate', minWr);
+    if (maxDd !== '') params.set('max_drawdown', maxDd);
+
+    const res = await fetch(`/api/benchmarks?${params}`);
+    if (!res.ok) { showToast('Failed to fetch data', 'error'); return; }
+    const data = await res.json();
+    state.total = data.total;
+    renderTable(data.items);
+    renderSummary(data.items);
+    renderPagination();
+  }
+
+  function pct(v, digits=2)  { return (v == null ? '—' : (v*100).toFixed(digits)+'%'); }
+  function num(v, digits=3)  { return (v == null ? '—' : (+v).toFixed(digits)); }
+  function fmtDate(s)        { return s ? s.slice(0,16).replace('T',' ') : '—'; }
+
+  function colorPct(v, flip=false) {
+    const pos = flip ? v < 0 : v > 0;
+    const cls = pos ? 'profit-pos' : (v < 0 ? 'profit-neg' : '');
+    return `<span class="${cls}">${pct(v)}</span>`;
+  }
+  function colorNum(v) {
+    return `<span class="${v > 1.5 ? 'profit-pos' : (v < 0.8 ? 'profit-neg' : '')}">${num(v)}</span>`;
+  }
+
+  function renderTable(items) {
+    const tbody = document.getElementById('table-body');
+    if (!items.length) {
+      tbody.innerHTML = `<tr><td colspan="12" class="text-center py-12 text-slate-500">No results found</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = items.map(r => `
+      <tr class="hover:bg-slate-800/50 transition fade-in">
+        <td class="px-4 py-3 font-mono text-xs text-slate-400 whitespace-nowrap">${fmtDate(r.run_at)}</td>
+        <td class="px-4 py-3 font-medium text-blue-400 cursor-pointer hover:text-blue-300 whitespace-nowrap" onclick='showDetail("${r.run_id}")'>${r.strategy}</td>
+        <td class="px-4 py-3">${r.tag ? `<span class="badge badge-yellow">${r.tag}</span>` : '<span class="text-slate-600">—</span>'}</td>
+        <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${r.timerange || '—'}</td>
+        <td class="px-4 py-3 text-right">${r.total_trades}</td>
+        <td class="px-4 py-3 text-right">${colorPct(r.win_rate)}</td>
+        <td class="px-4 py-3 text-right">${colorPct(r.total_profit_pct)}</td>
+        <td class="px-4 py-3 text-right">${colorPct(r.max_drawdown, true)}</td>
+        <td class="px-4 py-3 text-right">${colorNum(r.profit_factor)}</td>
+        <td class="px-4 py-3 text-right">${colorNum(r.sharpe)}</td>
+        <td class="px-4 py-3 text-right">${colorNum(r.calmar)}</td>
+        <td class="px-4 py-3 text-center">
+          <div class="flex gap-2 justify-center">
+            <button onclick='showDetail("${r.run_id}")' class="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs transition">Detail</button>
+            <button onclick='confirmDelete("${r.run_id}")' class="px-2 py-1 bg-red-900 hover:bg-red-700 rounded text-xs transition">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    // Update sort indicators
+    document.querySelectorAll('th[data-col]').forEach(th => {
+      th.classList.remove('sort-asc','sort-desc');
+      if (th.dataset.col === state.sortBy) {
+        th.classList.add(state.order === 'asc' ? 'sort-asc' : 'sort-desc');
+      }
+    });
+  }
+
+  function renderSummary(items) {
+    if (!items.length) { document.getElementById('summary-cards').innerHTML = ''; return; }
+    const avgWr = items.reduce((s,r)=>s+r.win_rate,0)/items.length;
+    const avgSharpe = items.reduce((s,r)=>s+r.sharpe,0)/items.length;
+    const bestProfit = Math.max(...items.map(r=>r.total_profit_pct));
+    const worstDD = Math.min(...items.map(r=>r.max_drawdown));
+
+    document.getElementById('summary-cards').innerHTML = [
+      ['Avg Win Rate', pct(avgWr), avgWr > 0.55 ? 'profit-pos' : 'profit-neg'],
+      ['Avg Sharpe', num(avgSharpe), avgSharpe > 1 ? 'profit-pos' : 'profit-neg'],
+      ['Best Profit', pct(bestProfit), 'profit-pos'],
+      ['Worst Drawdown', pct(worstDD), 'profit-neg'],
+    ].map(([label, val, cls]) => `
+      <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
+        <div class="text-xs text-slate-500 mb-1">${label}</div>
+        <div class="text-2xl font-bold ${cls}">${val}</div>
+      </div>
+    `).join('');
+  }
+
+  function renderPagination() {
+    const page = Math.floor(state.offset / PAGE_SIZE) + 1;
+    const total_pages = Math.ceil(state.total / PAGE_SIZE);
+    document.getElementById('page-info').textContent =
+      `Page ${page} of ${total_pages} · ${state.total} total`;
+    document.getElementById('total-badge').textContent = `${state.total} records`;
+    document.getElementById('btn-prev').disabled = state.offset === 0;
+    document.getElementById('btn-next').disabled = state.offset + PAGE_SIZE >= state.total;
+  }
+
+  // ── Controls ────────────────────────────────────────────────────────────────
+
+  function changePage(dir) {
+    state.offset = Math.max(0, state.offset + dir * PAGE_SIZE);
+    fetchData();
+  }
+
+  function applyFilters() {
+    state.offset = 0;
+    state.sortBy = document.getElementById('f-sort-by').value;
+    state.order  = document.getElementById('f-order').value;
+    fetchData();
+  }
+
+  function clearFilters() {
+    ['f-strategy','f-tag','f-min-wr','f-max-dd'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('f-sort-by').value = 'run_at';
+    document.getElementById('f-order').value = 'desc';
+    state = { offset: 0, total: 0, sortBy: 'run_at', order: 'desc' };
+    fetchData();
+  }
+
+  function refresh() { fetchData(); }
+
+  // Sortable columns
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (state.sortBy === col) {
+        state.order = state.order === 'desc' ? 'asc' : 'desc';
+      } else {
+        state.sortBy = col;
+        state.order = 'desc';
+      }
+      state.offset = 0;
+      document.getElementById('f-sort-by').value = col;
+      document.getElementById('f-order').value = state.order;
+      fetchData();
+    });
+  });
+
+  // ── Detail Modal ────────────────────────────────────────────────────────────
+
+  async function showDetail(runId) {
+    const res = await fetch(`/api/benchmarks/${runId}`);
+    if (!res.ok) { showToast('Not found', 'error'); return; }
+    const r = await res.json();
+    document.getElementById('modal-title').textContent = r.run_id;
+    document.getElementById('modal-body').innerHTML = `
+      <div class="grid grid-cols-2 gap-3">
+        ${field('Strategy',   r.strategy)}
+        ${field('Tag',        r.tag || '—')}
+        ${field('Timerange',  r.timerange)}
+        ${field('Pairs',      r.pairs)}
+        ${field('Run At',     fmtDate(r.run_at))}
+        ${field('Trades',     r.total_trades)}
+        ${field('Win Rate',   pct(r.win_rate))}
+        ${field('Total Profit', pct(r.total_profit_pct))}
+        ${field('Max Drawdown', pct(r.max_drawdown))}
+        ${field('Profit Factor', num(r.profit_factor))}
+        ${field('Sharpe',     num(r.sharpe))}
+        ${field('Calmar',     num(r.calmar))}
+        ${field('Avg Duration', r.avg_duration_mins + ' min')}
+      </div>
+      <div class="mt-4 pt-4 border-t border-slate-700">
+        <a href="/api/trades/${r.run_id}" target="_blank"
+           class="text-blue-400 hover:text-blue-300 text-xs">View trades JSON →</a>
+      </div>
+    `;
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function field(label, val) {
+    return `
+      <div class="bg-slate-800 rounded p-3">
+        <div class="text-xs text-slate-500 mb-1">${label}</div>
+        <div class="font-medium">${val}</div>
+      </div>`;
+  }
+
+  function closeModal(e) {
+    if (e.target === document.getElementById('modal')) {
+      document.getElementById('modal').classList.add('hidden');
+    }
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
+
+  let _pendingDelete = null;
+
+  function confirmDelete(runId) {
+    _pendingDelete = runId;
+    document.getElementById('confirm-modal').classList.remove('hidden');
+    document.getElementById('confirm-delete-btn').onclick = () => doDelete(runId);
+  }
+
+  async function doDelete(runId) {
+    closeConfirm();
+    const res = await fetch(`/api/benchmarks/${runId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Record deleted', 'success');
+      fetchData();
+    } else {
+      showToast('Delete failed', 'error');
+    }
+  }
+
+  function closeConfirm(e) {
+    if (!e || e.target === document.getElementById('confirm-modal')) {
+      document.getElementById('confirm-modal').classList.add('hidden');
+      _pendingDelete = null;
+    }
+  }
+
+  // ── Import CSV ──────────────────────────────────────────────────────────────
+
+  async function importCsv() {
+    const res = await fetch('/api/benchmarks/import', { method: 'POST' });
+    if (res.ok) {
+      const d = await res.json();
+      showToast(`Imported ${d.imported} records`, 'success');
+      fetchData();
+    } else {
+      showToast('Import failed', 'error');
+    }
+  }
+
+  // ── Toast ───────────────────────────────────────────────────────────────────
+
+  function showToast(msg, type='success') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `toast ${type === 'error' ? 'bg-red-800 text-white' : 'bg-green-800 text-white'}`;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 3000);
+  }
+
+  // ── Init ────────────────────────────────────────────────────────────────────
+  fetchData();
+</script>
+</body>
+</html>

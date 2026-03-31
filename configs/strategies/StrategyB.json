@@ -1,0 +1,18 @@
+{
+  "stoploss": -0.07,
+  "timeframe": "4h",
+  "trailing_stop": false,
+  "minimal_roi": {
+    "0": 0.15,
+    "120": 0.05,
+    "360": 0.02
+  },
+  "tp_config": {
+    "enabled": true,
+    "levels": [
+      {"ratio": 0.50, "target": 0.03},
+      {"ratio": 0.25, "target": 0.07},
+      {"ratio": 0.25, "target": 0.12}
+    ]
+  }
+}

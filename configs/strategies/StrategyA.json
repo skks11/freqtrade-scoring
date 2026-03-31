@@ -1,0 +1,20 @@
+{
+  "stoploss": -0.03,
+  "trailing_stop": true,
+  "trailing_stop_positive": 0.01,
+  "trailing_stop_positive_offset": 0.02,
+  "trailing_only_offset_is_reached": true,
+  "minimal_roi": {
+    "0": 0.06,
+    "60": 0.03,
+    "120": 0.01
+  },
+  "tp_config": {
+    "enabled": true,
+    "levels": [
+      {"ratio": 0.33, "target": 0.01},
+      {"ratio": 0.33, "target": 0.025},
+      {"ratio": 0.34, "target": 0.04}
+    ]
+  }
+}

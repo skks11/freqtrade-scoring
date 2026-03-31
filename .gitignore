@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Freqtrade data
+user_data/data/
+user_data/logs/
+
+# Results (generated data — exclude from repo)
+results/
+
+# OS
+.DS_Store
+*.swp
+
+# Temp freqtrade configs
+/tmp/freqtrade_run_*.json
