@@ -66,14 +66,18 @@ class CsvSignalStrategy(IStrategy):  # type: ignore[misc]
 
     # ── Signal loading ────────────────────────────────────────────────────────
 
+    def _effective_strategy_name(self) -> str:
+        """Strategy name from config takes priority over class attribute."""
+        return self.config.get("strategy_name", self.strategy_name)
+
     def _load_signals(self, pair: str) -> pd.DataFrame:
         timeframe = self.config.get("timeframe", "1h")
-        cache_key = f"{pair}_{timeframe}"
+        cache_key = f"{self._effective_strategy_name()}_{pair}_{timeframe}"
         if cache_key in self._signal_cache:
             return self._signal_cache[cache_key]
 
         pair_file = pair.replace("/", "_")
-        path = SIGNALS_DIR / self.strategy_name / f"{pair_file}_{timeframe}.csv"
+        path = SIGNALS_DIR / self._effective_strategy_name() / f"{pair_file}_{timeframe}.csv"
         if not path.exists():
             log.warning("Signal file not found: %s", path)
             df = pd.DataFrame(columns=["timestamp", "pair", "signal", "entry_tag", "exit_tag"])
@@ -106,7 +110,7 @@ class CsvSignalStrategy(IStrategy):  # type: ignore[misc]
         return merged
 
     def _get_csv_exit_tag(self, pair: str, current_time: pd.Timestamp) -> str:
-        signals = self._load_signals(pair)
+        signals = self._load_signals(pair)  # uses _effective_strategy_name internally
         if signals.empty:
             return ""
         row = signals[signals["timestamp"] == current_time]

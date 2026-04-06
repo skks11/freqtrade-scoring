@@ -240,18 +240,28 @@ Only write fields that differ from `base_config.json`:
 ## Adding a New Strategy
 
 1. Drop signal CSVs into `signals/NewStrategy/`
-2. Optionally create `configs/strategies/NewStrategy.json` for overrides
-3. Create `strategies/NewStrategy.py`:
+2. Optionally create `configs/strategies/NewStrategy.json` for overrides (SL, TP, timeframe, etc.)
+3. Run:
 
-```python
-from strategies.CsvSignalStrategy import CsvSignalStrategy
-
-class NewStrategy(CsvSignalStrategy):
-    strategy_name = "NewStrategy"
-    timeframe = "1h"
+```bash
+python scripts/run_backtest.py --strategy NewStrategy --timerange 20230101-20231231 --mock
 ```
 
-4. Run: `python scripts/run_backtest.py --strategy NewStrategy --timerange ... --mock`
+No strategy class file needed. `CsvSignalStrategy` is the single shared class; `strategy_name` is injected via config to locate the correct signals directory.
+
+> If you need **custom exit logic** beyond the built-in TP/tag routing, create `strategies/NewStrategy.py` and override `custom_exit`:
+>
+> ```python
+> from strategies.CsvSignalStrategy import CsvSignalStrategy
+>
+> class NewStrategy(CsvSignalStrategy):
+>     def custom_exit(self, pair, trade, current_time, current_rate, current_profit, **kwargs):
+>         result = super().custom_exit(pair, trade, current_time, current_rate, current_profit, **kwargs)
+>         if result:
+>             return result
+>         # your custom logic here
+>         return None
+> ```
 
 ## Web Dashboard
 

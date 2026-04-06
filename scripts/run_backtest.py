@@ -115,8 +115,9 @@ def run_backtest(
     config_path: Path | None = None,
 ) -> dict:
     config = load_config(strategy)
-    # Ensure tp_config is populated with defaults
     config["tp_config"] = get_tp_config(config)
+    # Inject strategy_name so CsvSignalStrategy can locate signals without a subclass file
+    config["strategy_name"] = strategy
 
     run_id = _make_run_id(strategy)
     log.info("Starting backtest run_id=%s strategy=%s timerange=%s mock=%s",
@@ -152,7 +153,7 @@ def _run_freqtrade(strategy: str, config: dict, timerange: str,
         cmd = [
             "freqtrade", "backtesting",
             "--config", str(tmp_config),
-            "--strategy", strategy,
+            "--strategy", "CsvSignalStrategy",  # single class handles all strategies via config
             "--timerange", timerange,
             "--export", "trades",
         ]

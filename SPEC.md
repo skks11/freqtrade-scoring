@@ -324,18 +324,28 @@ def generate_all(
 
 ```python
 class CsvSignalStrategy(IStrategy):
-    strategy_name: str = "default"  # 子类必须覆盖
+    strategy_name: str = "default"  # fallback；优先读 self.config["strategy_name"]
 ```
 
-**继承方式：**
+**通常不需要子类文件。** `run_backtest.py` 会自动把 `strategy_name` 写入 config，`CsvSignalStrategy` 据此定位 signals 目录：
+
+```
+# 只需信号文件 + 可选的 diff config，直接运行：
+python scripts/run_backtest.py --strategy MyStrategy --timerange ... --mock
+```
+
+**仅当需要自定义退出逻辑时才创建子类：**
 
 ```python
 from strategies.CsvSignalStrategy import CsvSignalStrategy
 
 class MyStrategy(CsvSignalStrategy):
-    strategy_name = "MyStrategy"   # 必须与 signals/ 目录名一致
-    timeframe = "1h"               # 必须与信号文件的 timeframe 后缀一致
-    stoploss = -0.03               # 真实 freqtrade 模式使用
+    def custom_exit(self, pair, trade, current_time, current_rate, current_profit, **kwargs):
+        result = super().custom_exit(pair, trade, current_time, current_rate, current_profit, **kwargs)
+        if result:
+            return result
+        # 策略专属逻辑
+        return None
 ```
 
 ### 4.2 freqtrade 钩子方法
